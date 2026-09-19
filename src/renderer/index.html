@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
+    <title>GitHub 连通性检测</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="app-header">
+        <div class="brand">
+          <span class="brand-mark">G</span>
+          <div>
+            <h1>GitHub 连通性检测</h1>
+            <p>探测关键域名可达性与延迟，辅助判断网络加速方案</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <label class="switch">
+            <input type="checkbox" id="proxyToggle" />
+            <span class="switch-track"></span>
+            <span class="switch-label">使用代理探测</span>
+          </label>
+          <button class="btn btn-primary" id="runBtn">开始检测</button>
+        </div>
+      </header>
+
+      <section id="proxyPanel" class="proxy-panel hidden">
+        <div class="field">
+          <label for="proxyHost">代理地址（HTTP 代理）</label>
+          <input id="proxyHost" type="text" placeholder="127.0.0.1" />
+        </div>
+        <div class="field">
+          <label for="proxyPort">端口</label>
+          <input id="proxyPort" type="number" placeholder="7890" />
+        </div>
+      </section>
+
+      <section class="hosts-card">
+        <div class="hosts-head">
+          <div class="hosts-title">
+            <span class="status-dot idle" id="hostsDot"></span>
+            <div>
+              <h2>Hosts 一键加速</h2>
+              <p>
+                用检测结果里的实际建连 IP 写入 hosts，绕过被污染的解析。写入前自动备份，可一键还原。
+              </p>
+            </div>
+          </div>
+          <div class="hosts-actions">
+            <button class="btn btn-ghost" id="hostsRefreshBtn">刷新状态</button>
+            <button class="btn btn-primary" id="hostsApplyBtn">生成并应用</button>
+            <button class="btn btn-danger" id="hostsRevertBtn">还原</button>
+          </div>
+        </div>
+        <div class="hosts-meta" id="hostsMeta"></div>
+        <div class="hosts-preview" id="hostsPreview"></div>
+        <div class="hosts-msg" id="hostsMsg"></div>
+      </section>
+
+      <section class="hosts-card git-card">
+        <div class="hosts-head">
+          <div class="hosts-title">
+            <span class="status-dot idle" id="gitDot"></span>
+            <div>
+              <h2>Git 代理配置</h2>
+              <p>为 git 写代理配置（<code>~/.gitconfig</code>），可选仅对 GitHub 生效，并可把 <code>git://</code> 协议改写为 <code>https://</code>。</p>
+            </div>
+          </div>
+          <div class="hosts-actions">
+            <button class="btn btn-ghost" id="gitRefreshBtn">刷新状态</button>
+            <button class="btn btn-primary" id="gitApplyBtn">应用</button>
+            <button class="btn btn-danger" id="gitClearBtn">清除</button>
+          </div>
+        </div>
+        <div class="git-fields">
+          <div class="field">
+            <label for="gitProxyHost">代理地址</label>
+            <input id="gitProxyHost" type="text" placeholder="127.0.0.1" />
+          </div>
+          <div class="field">
+            <label for="gitProxyPort">端口</label>
+            <input id="gitProxyPort" type="number" placeholder="7890" value="7890" />
+          </div>
+          <div class="radio-group">
+            <label class="radio">
+              <input type="radio" name="gitScope" value="global" checked />
+              <span>全局生效</span>
+            </label>
+            <label class="radio">
+              <input type="radio" name="gitScope" value="github" />
+              <span>仅 GitHub</span>
+            </label>
+          </div>
+          <label class="check">
+            <input type="checkbox" id="gitRewrite" />
+            <span>改写 git:// → https://</span>
+          </label>
+        </div>
+        <div class="hosts-meta" id="gitMeta"></div>
+        <div class="hosts-preview" id="gitPreview"></div>
+        <div class="hosts-msg" id="gitMsg"></div>
+      </section>
+
+      <section class="hosts-card url-card">
+        <div class="hosts-head">
+          <div class="hosts-title">
+            <span class="status-dot idle" id="urlDot"></span>
+            <div>
+              <h2>URL 镜像改写加速</h2>
+              <p>把 GitHub 链接改写到镜像前缀（ghproxy 风格）便于加速拉取。支持 <code>https://</code>、<code>git://</code>、<code>git@github.com:</code> 三种写法，改好后自动复制到剪贴板。</p>
+            </div>
+          </div>
+          <div class="hosts-actions">
+            <button class="btn btn-ghost" id="urlReadBtn">读取剪贴板</button>
+            <button class="btn btn-primary" id="urlRewriteBtn">改写并复制</button>
+          </div>
+        </div>
+        <div class="git-fields">
+          <div class="field url-field">
+            <label for="mirrorInput">镜像地址</label>
+            <input id="mirrorInput" type="text" list="mirrorList" placeholder="https://gh-proxy.com" value="https://gh-proxy.com" />
+            <datalist id="mirrorList">
+              <option value="https://gh-proxy.com"></option>
+              <option value="https://mirror.ghproxy.com"></option>
+              <option value="https://ghproxy.com"></option>
+            </datalist>
+          </div>
+        </div>
+        <div class="url-box">
+          <label for="urlInput">输入 Git 命令或链接（支持多行）</label>
+          <textarea id="urlInput" rows="3" spellcheck="false" placeholder="例如：git clone https://github.com/user/repo.git&#10;或直接点「读取剪贴板」"></textarea>
+        </div>
+        <div>
+          <div class="preview-title">改写结果：</div>
+          <pre class="url-result" id="urlResult"></pre>
+        </div>
+        <div class="hosts-msg" id="urlMsg"></div>
+        <p class="url-tip">
+          提示：第三方镜像会经其服务器转发，请只用于公开仓库，<strong>切勿粘贴私有仓库或含凭据/令牌的地址</strong>。
+        </p>
+      </section>
+
+      <section class="summary-card">
+        <div class="stat">
+          <div class="stat-label">测试目标</div>
+          <div class="stat-value" id="statTotal">–</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">可达</div>
+          <div class="stat-value ok" id="statOk">–</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">不可达</div>
+          <div class="stat-value bad" id="statBad">–</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">平均延迟</div>
+          <div class="stat-value" id="statAvg">–</div>
+        </div>
+        <div class="stat stat-wide">
+          <div class="stat-label">综合评级</div>
+          <div class="stat-value" id="statGrade">–</div>
+        </div>
+      </section>
+
+      <section id="targetList" class="target-list"></section>
+
+      <footer class="app-footer">
+        <span>说明：检测通过 TCP 建连完成，结果用于判断网络连通状况。</span>
+      </footer>
+    </div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

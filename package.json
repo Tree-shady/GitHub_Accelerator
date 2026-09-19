@@ -1,0 +1,63 @@
+{
+  "name": "github-accelerator",
+  "version": "0.1.0",
+  "description": "GitHub 连通性检测与加速桌面工具",
+  "main": "./out/main/index.js",
+  "author": "",
+  "license": "MIT",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "pack:tools": "electron-vite build",
+    "dist": "npm run build && set NODE_TLS_REJECT_UNAUTHORIZED=0&& node --use-system-ca scripts/package-win.js",
+    "dist:portable": "npm run build && set NODE_TLS_REJECT_UNAUTHORIZED=0&& node --use-system-ca scripts/package-win.js --portable"
+  },
+  "build": {
+    "appId": "com.trae.github-accelerator",
+    "productName": "GitHub加速器",
+    "electronVersion": "33.4.11",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "build/elevate-copy.exe",
+        "to": "elevate-copy.exe"
+      }
+    ],
+    "asar": true,
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${arch}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "GitHub加速器"
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "electron": "^33.2.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.0"
+  }
+}
