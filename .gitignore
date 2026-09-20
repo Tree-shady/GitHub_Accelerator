@@ -4,3 +4,29 @@ dist/
 *.log
 .DS_Store
 release/
+
+# ---- 代码签名证书与凭据（切勿提交）----
+# 常见证书格式
+*.pfx
+*.p12
+*.pkcs12
+*.cer
+*.crt
+*.der
+*.pem
+*.key
+*.jks
+# 统一证书/密钥存放目录
+cert/
+certs/
+keys/
+secrets/
+# 解释器/密钥轮换配置里的私钥占位
+*.password
+# 构建/运行密钥相关环境文件
+.env
+.env.*
+!.env.example
+# 打包签名用到的本地临时证书（由 CSC_LINK 指向，勿入库）
+build/cert/
+build/certificates/

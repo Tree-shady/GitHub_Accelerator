@@ -598,3 +598,86 @@ body {
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* one-click auto accelerate button */
+#oneClickBtn {
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+}
+
+/* speed test */
+.speed-card {
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.07), transparent);
+}
+
+.speed-url-field {
+  flex: 1;
+  min-width: 320px;
+}
+
+.speed-url-field input {
+  width: 100%;
+  font-family: 'Cascadia Code', Consolas, monospace;
+}
+
+.speed-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.speed-chart {
+  margin-top: 12px;
+  background: #0b0f1a;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.speed-chart canvas {
+  width: 100%;
+  height: 180px;
+  display: block;
+}
+
+.speed-card .stat-value {
+  font-size: 20px;
+}
+
+/* IP pool */
+.ippool-card {
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.06), transparent);
+}
+
+/* logs */
+.log-card {
+  background: linear-gradient(180deg, rgba(34, 197, 94, 0.05), transparent);
+}
+
+.log-view {
+  margin-top: 12px;
+  background: #0b0f1a;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  line-height: 1.6;
+  color: var(--text-dim);
+  max-height: 180px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-view:empty::before {
+  content: '（暂无日志）';
+}
+
+.log-view.ok-line {
+  color: var(--ok);
+}
+
+.log-view.err-line {
+  color: var(--bad);
+}

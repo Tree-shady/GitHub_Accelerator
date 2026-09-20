@@ -144,7 +144,7 @@ function errText(err: unknown): string {
 }
 
 // 无写权限时，通过带 requireAdministrator 清单的辅助进程覆盖 hosts（会触发 UAC 提示）。
-// 优先走编译好的 elevate-copy.exe（不注入脚本，降低杀软误报）；仅在开发环境无辅助程序时兜底用 PowerShell。
+// 优先走编译好的 elevate-copy.exe；仅在开发环境无辅助程序时兜底用 PowerShell 脚本复制。
 async function writeViaElevation(content: string): Promise<void> {
   const hostsPath = getHostsPath()
   const staging = path.join(app.getPath('userData'), 'hosts-staging')
@@ -152,21 +152,100 @@ async function writeViaElevation(content: string): Promise<void> {
 
   const helper = elevateCopyPath()
   if (helper) {
-    try {
-      await execFileAsync(helper, [staging, hostsPath], { windowsHide: true })
-    } catch (err) {
-      const e = err as NodeJS.ErrnoException
-      if (e && e.code === 'EPERM') {
-        throw new Error(
-          '无法启动提权辅助程序（受限环境拒绝创建进程）。请以管理员身份直接运行本应用后重试。'
-        )
-      }
-      throw new Error('提权写入失败（UAC 可能被取消）：' + errText(err))
-    }
+    await elevateViaStartProcess(helper, staging, hostsPath)
     return
   }
 
   await writeViaElevationViaPowershell(staging, hostsPath)
+}
+
+// 通过 ShellExecute(start-process) 拉起带 requireAdministrator 清单的辅助进程以触发 UAC。
+// 注意：execFile/spawn 走 CreateProcess，无法请求提升（会报 EACCES/740），
+// 因此必须用 Start-Process(内部走 ShellExecute) 由清单触发 UAC 弹窗。
+// 路径经环境变量传入，命令简单可读，不再使用编码脚本，兼顾低误报。
+async function elevateViaStartProcess(helper: string, staging: string, hostsPath: string): Promise<void> {
+  // 结果文件：辅助程序/外层 PS 把真实失败原因和退出码写回，便于区分"取消 UAC"与"复制失败"
+  const resultPath = staging + '.result'
+
+  // hosts 常被 DNS/杀软瞬时占用，重试若干次以越过瞬时锁文件
+  const MAX_ATTEMPTS = 3
+  let last: { code: number; detail: string } | null = null
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      await fs.rm(resultPath, { force: true })
+    } catch {
+      /* 清理失败可忽略 */
+    }
+
+    // 101 = Start-Process 本身抛错（多为取消 UAC/被拒），出错信息写入 resultPath 后由 Node 取回
+    const cmd = [
+      "$ErrorActionPreference='Stop'",
+      'if (-not $env:GA_HELPER) { exit 2 }',
+      'try { $p = Start-Process -FilePath $env:GA_HELPER -ArgumentList $env:GA_STAGING,$env:GA_HOSTS,$env:GA_RESULT -Wait -PassThru; exit $p.ExitCode }',
+      'catch { try { Set-Content -LiteralPath $env:GA_RESULT -Value $_.Exception.Message } catch {}; exit 101 }'
+    ].join('; ')
+    const bin = powershellCandidates()[0] || 'powershell.exe'
+
+    let code: number
+    try {
+      await execFileAsync(
+        bin,
+        ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-Command', cmd],
+        {
+          windowsHide: true,
+          env: {
+            ...process.env,
+            GA_HELPER: helper,
+            GA_STAGING: staging,
+            GA_HOSTS: hostsPath,
+            GA_RESULT: resultPath
+          }
+        }
+      )
+      code = 0
+    } catch (err) {
+      code = (err as { code?: number }).code ?? 1
+    }
+
+    let detail = ''
+    try {
+      detail = (await fs.readFile(resultPath, 'utf8')).trim()
+    } catch {
+      /* 无结果文件则保留空 */
+    }
+
+    if (code === 0) {
+      // 成功；剩余交由 commit() 的 round-trip 校验确认
+      return
+    }
+    if (code !== 101 && code !== 2 && attempt < MAX_ATTEMPTS) {
+      // 复制失败多为瞬时锁文件，重试
+      last = { code, detail }
+      await new Promise((r) => setTimeout(r, 300 * attempt))
+      continue
+    }
+    last = { code, detail }
+    break
+  }
+
+  const { code, detail } = last ?? { code: -1, detail: '' }
+  const reason = detail ? `（${detail}）` : ''
+  if (code === 101) {
+    throw new Error(
+      '提权被取消或受限：未获得管理员授权。' + reason + '请重新点击并允许 UAC 提权。'
+    )
+  }
+  if (code === 2) {
+    throw new Error('未找到提权辅助程序（elevate-copy.exe），请重新安装或补充该文件。')
+  }
+  if (code === 3) {
+    throw new Error('辅助程序报告：目标文件写入后不存在（' + (detail || '未知') + '）。')
+  }
+  throw new Error(
+    `提权后复制 hosts 失败（辅助程序退出码 ${code}${reason}）。` +
+      (detail ? ' 请按提示处理；' : ' 未获取到具体原因，请确认以管理员权限运行本应用后重试。') +
+      ' 若目标被程序占用，请关闭占用程序后重试。'
+  )
 }
 
 // 兜底实现：用 -EncodedCommand 传 Base64(UTF-16LE) 子命令，规避多层嵌套引号的解析问题

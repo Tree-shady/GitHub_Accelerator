@@ -67,3 +67,16 @@ export interface GitApplyOptions {
   scope: GitProxyScope
   rewriteGit: boolean
 }
+
+export interface SpeedSample {
+  tSec: number
+  bytes: number
+}
+
+export interface SpeedResult {
+  totalBytes: number
+  seconds: number
+  avgBps: number
+  samples: SpeedSample[]
+  error?: string
+}

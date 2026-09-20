@@ -29,9 +29,19 @@ const WEB_IP_POOL = [
   '140.82.114.3'
 ]
 
-// 需要 IP 池兜底的域名 → 候选 IP 列表
-const HOST_IP_POOL: Record<string, string[]> = {
-  'github.com': WEB_IP_POOL
+// 默认兜底池仅对 github.com 生效；实际加载时会并入用户自定义 IP（见 poolFor）
+let customIpsCache: string[] = []
+
+// 注入用户自定义 IP（由 renderer 维护后调用），检测时并入兜底池
+export function setCustomIpPool(ips: string[]): void {
+  customIpsCache = ips
+}
+
+// 返回合并后的兜底池（默认 + 自定义）
+function poolFor(host: string): string[] {
+  const base = host === 'github.com' ? WEB_IP_POOL : []
+  if (base.length === 0 && customIpsCache.length === 0) return []
+  return [...new Set([...base, ...customIpsCache])]
 }
 
 async function resolveIp(host: string): Promise<string | undefined> {
@@ -130,7 +140,7 @@ export async function runConnectivityTest(
         connectJobs.push({ connectIp: undefined, labelIp: undefined })
       } else {
         if (baseIp) connectJobs.push({ connectIp: baseIp, labelIp: baseIp })
-        for (const pip of HOST_IP_POOL[t.host] || []) {
+        for (const pip of poolFor(t.host)) {
           if (baseIp && pip === baseIp) continue
           connectJobs.push({ connectIp: pip, labelIp: pip })
         }
@@ -138,13 +148,17 @@ export async function runConnectivityTest(
         if (connectJobs.length === 0) connectJobs.push({ connectIp: undefined, labelIp: undefined })
       }
 
+      // 并发探测全部候选 IP（含多端口并行），整体耗时从「各候选超时之和」降到「最慢一次探测」，
+      // 避免单域名最坏等待 ~20s；连通性按延迟取最优，顺序不影响正确性。
       const results: ProbeResult[] = []
-      for (const job of connectJobs) {
-        const per = await Promise.all(
-          t.ports.map((port) => tcpProbe(t.host, port, timeoutMs, proxy, job.connectIp))
+      const perByJob = await Promise.all(
+        connectJobs.map((job) =>
+          Promise.all(
+            t.ports.map((port) => tcpProbe(t.host, port, timeoutMs, proxy, job.connectIp))
+          )
         )
-        results.push(...per)
-      }
+      )
+      for (const per of perByJob) results.push(...per)
 
       const withIp = results.map((r) => ({ ...r, ip: r.remoteIp || baseIp }))
       const connected = withIp.filter((r) => r.connected)

@@ -67,6 +67,8 @@ function init(): void {
     })
     void refreshHostsStatus()
     void refreshGitStatus()
+    void refreshIppool()
+    void refreshLog()
   } else {
     // 无 preload 时用默认目标（例如在纯浏览器调试场景）
     const defaults: Target[] = [
@@ -492,5 +494,274 @@ urlRewriteBtn.addEventListener('click', async () => {
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
+
+/* ===================== 一键诊断并加速 ===================== */
+const oneClickBtn = document.getElementById('oneClickBtn') as HTMLButtonElement
+
+oneClickBtn.addEventListener('click', async () => {
+  if (!window.api) return
+  if (proxyToggle.checked) {
+    setHostsMsg('一键加速需直连探测，请先关闭「使用代理」再试。', 'warn')
+    return
+  }
+  oneClickBtn.disabled = true
+  oneClickBtn.textContent = '诊断并应用中…'
+  try {
+    setAll('pending')
+    const reports = await window.api.testConnectivity({
+      targets: states.map((s) => s.raw),
+      proxy: undefined
+    })
+    applyReports(reports)
+    const entries = buildHostEntries()
+    if (!entries.length) {
+      setHostsMsg('诊断无可达域名，无法生成 hosts 条目，请检查网络或本机 GitHub 出口。', 'err')
+      return
+    }
+    const res = await window.api.hosts.apply(entries)
+    renderHostsPreview(res.entries)
+    setHostsMsg(
+      `一键加速完成：已应用 ${res.entries.length} 条条目。${res.elevated ? '（通过提权进程写入）' : ''}`,
+      'ok'
+    )
+    await refreshHostsStatus()
+  } catch (err) {
+    setHostsMsg(`一键加速失败：${errMessage(err)}`, 'err')
+  } finally {
+    oneClickBtn.disabled = false
+    oneClickBtn.textContent = '⚡ 一键诊断并加速'
+  }
+})
+
+/* ===================== GitHub IP 池 ===================== */
+const ippoolDot = document.getElementById('ippoolDot') as HTMLElement
+const ippoolReadBtn = document.getElementById('ippoolReadBtn') as HTMLButtonElement
+const ippoolSaveBtn = document.getElementById('ippoolSaveBtn') as HTMLButtonElement
+const ippoolInput = document.getElementById('ippoolInput') as HTMLTextAreaElement
+const ippoolMsg = document.getElementById('ippoolMsg') as HTMLElement
+
+function setIppoolMsg(text: string, kind: '' | 'ok' | 'err' | 'warn'): void {
+  ippoolMsg.textContent = text
+  ippoolMsg.className = 'hosts-msg' + (kind ? ` ${kind}` : '')
+}
+
+async function refreshIppool(): Promise<void> {
+  if (!window.api) return
+  try {
+    const ips = await window.api.ippool.get()
+    ippoolInput.value = ips.join('\n')
+    ippoolDot.className = `status-dot ${ips.length ? 'reachable' : 'idle'}`
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+ippoolReadBtn.addEventListener('click', () => void refreshIppool())
+ippoolSaveBtn.addEventListener('click', async () => {
+  if (!window.api) return
+  const ips = ippoolInput.value
+    .split(/[\s,;]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  try {
+    const saved = await window.api.ippool.set(ips)
+    setIppoolMsg(`已保存 ${saved.length} 个自定义 IP，检测时并入兜底池。`, 'ok')
+    ippoolDot.className = `status-dot ${saved.length ? 'reachable' : 'idle'}`
+  } catch (err) {
+    setIppoolMsg(`保存失败：${errMessage(err)}`, 'err')
+  }
+})
+
+/* ===================== 操作日志 ===================== */
+const logDot = document.getElementById('logDot') as HTMLElement
+const logRefreshBtn = document.getElementById('logRefreshBtn') as HTMLButtonElement
+const logExportBtn = document.getElementById('logExportBtn') as HTMLButtonElement
+const logClearBtn = document.getElementById('logClearBtn') as HTMLButtonElement
+const logView = document.getElementById('logView') as HTMLElement
+const logMsg = document.getElementById('logMsg') as HTMLElement
+
+function setLogMsg(text: string, kind: '' | 'ok' | 'err' | 'warn'): void {
+  logMsg.textContent = text
+  logMsg.className = 'hosts-msg' + (kind ? ` ${kind}` : '')
+}
+
+async function refreshLog(): Promise<void> {
+  if (!window.api) return
+  const content = await window.api.log.get()
+  logView.textContent = content.trim() || ''
+  logView.innerHTML = ''
+  if (content.trim()) {
+    for (const line of content.trim().split('\n')) {
+      const div = document.createElement('div')
+      div.textContent = line
+      div.className = line.includes(' ERR ') ? 'err-line' : 'ok-line'
+      logView.appendChild(div)
+    }
+  }
+  logDot.className = `status-dot ${content.trim() ? 'reachable' : 'idle'}`
+}
+
+logRefreshBtn.addEventListener('click', () => void refreshLog())
+logExportBtn.addEventListener('click', async () => {
+  if (!window.api) return
+  try {
+    const res = await window.api.log.export('github-accelerator-operation.log')
+    setLogMsg(res.canceled ? '已取消导出。' : `已导出到：${res.filePath}`, res.canceled ? '' : 'ok')
+  } catch (err) {
+    setLogMsg(`导出失败：${errMessage(err)}`, 'err')
+  }
+})
+logClearBtn.addEventListener('click', async () => {
+  if (!window.api) return
+  try {
+    await window.api.log.clear()
+    await refreshLog()
+    setLogMsg('已清空操作日志。', 'ok')
+  } catch (err) {
+    setLogMsg(`清空失败：${errMessage(err)}`, 'err')
+  }
+})
+
+/* ===================== 加速测速（下载 / 上传 + 流量） ===================== */
+const speedDot = document.getElementById('speedDot') as HTMLElement
+const speedDownBtn = document.getElementById('speedDownBtn') as HTMLButtonElement
+const speedUpBtn = document.getElementById('speedUpBtn') as HTMLButtonElement
+const speedCancelBtn = document.getElementById('speedCancelBtn') as HTMLButtonElement
+const speedUrl = document.getElementById('speedUrl') as HTMLInputElement
+const speedNow = document.getElementById('speedNow') as HTMLElement
+const speedAvg = document.getElementById('speedAvg') as HTMLElement
+const speedTotal = document.getElementById('speedTotal') as HTMLElement
+const speedTime = document.getElementById('speedTime') as HTMLElement
+const speedCanvas = document.getElementById('speedCanvas') as HTMLCanvasElement
+const speedMsg = document.getElementById('speedMsg') as HTMLElement
+
+interface SpeedPoint {
+  tSec: number
+  bytes: number
+}
+
+let speedRunning = false
+let speedMbps = false
+const speedPoints: SpeedPoint[] = []
+
+function setSpeedMsg(text: string, kind: '' | 'ok' | 'err' | 'warn'): void {
+  speedMsg.textContent = text
+  speedMsg.className = 'hosts-msg' + (kind ? ` ${kind}` : '')
+}
+
+function fmtRate(bps: number): string {
+  return `${(bps / 1e6).toFixed(2)} MB/s`
+}
+
+function fmtBytes(n: number): string {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)} GB`
+  if (n >= 1e6) return `${(n / 1e6).toFixed(2)} MB`
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)} KB`
+  return `${n} B`
+}
+
+function drawSpeedCurve(points: SpeedPoint[], mbps: boolean): void {
+  const ctx = speedCanvas.getContext('2d')
+  if (!ctx) return
+  const w = speedCanvas.width
+  const h = speedCanvas.height
+  ctx.clearRect(0, 0, w, h)
+
+  const unit = mbps ? 1e6 : 1e3
+  const peak = Math.max(1, ...points.map((p) => (p.bytes * 1000) / unit))
+
+  // 网格
+  ctx.strokeStyle = '#1e293b'
+  ctx.fillStyle = '#8b97ad'
+  ctx.font = '10px sans-serif'
+  ctx.lineWidth = 1
+  for (let i = 0; i <= 4; i++) {
+    const y = h - (h * i) / 4
+    ctx.beginPath()
+    ctx.moveTo(34, y)
+    ctx.lineTo(w, y)
+    ctx.stroke()
+    ctx.fillText(`${((peak * i) / 4).toFixed(1)}`, 4, y - 3)
+  }
+
+  // 柱状图（每秒一个柱）
+  const bw = (w - 34) / Math.max(1, points.length)
+  const grad = ctx.createLinearGradient(0, 0, 0, h)
+  grad.addColorStop(0, '#3b82f6')
+  grad.addColorStop(1, 'rgba(59,130,246,0.15)')
+  ctx.fillStyle = grad
+  for (let i = 0; i < points.length; i++) {
+    const val = (points[i].bytes * 1000) / unit // 当前秒速率
+    const bh = (h * val) / peak
+    ctx.fillRect(34 + i * bw, h - bh, Math.max(1, bw - 1), bh)
+  }
+}
+
+function updateSpeedStats(points: SpeedPoint[]): void {
+  const last = points.length ? points[points.length - 1] : null
+  const nowBps = last ? last.bytes * 1000 : 0
+  speedNow.textContent = nowBps > 0 ? fmtRate(nowBps) : '–'
+  const totalBytes = points.reduce((a, p) => a + p.bytes, 0)
+  const avgBps = points.length ? totalBytes / Math.max(0.5, points.length) : 0
+  speedAvg.textContent = avgBps > 0 ? `${(avgBps / 1e6).toFixed(2)} MB/s` : '–'
+  speedTotal.textContent = fmtBytes(totalBytes * 1000)
+  const t = points.length ? points[points.length - 1].tSec : 0
+  speedTime.textContent = `${t.toFixed(1)} s`
+}
+
+async function runSpeed(kind: 'download' | 'upload'): Promise<void> {
+  if (!window.api || speedRunning) return
+  speedRunning = true
+  speedMbps = true
+  speedPoints.length = 0
+  for (const b of [speedDownBtn, speedUpBtn, speedCancelBtn]) b.disabled = false
+  speedDownBtn.disabled = true
+  speedUpBtn.disabled = true
+  speedDot.className = 'status-dot pending'
+  setSpeedMsg(kind === 'download' ? '正在测下载…' : '正在测上传…', '')
+
+  const off = window.api.speed.onSample((s) => {
+    speedPoints.push({ tSec: s.tSec, bytes: s.bytes })
+    updateSpeedStats(speedPoints)
+    drawSpeedCurve(speedPoints, speedMbps)
+  })
+
+  try {
+    let result
+    if (kind === 'download') {
+      result = await window.api.speed.download(speedUrl.value.trim())
+    } else {
+      const url = speedUrl.value.trim()
+      const upUrl = /speed\.cloudflare\.com/.test(url)
+        ? 'https://speed.cloudflare.com/__up'
+        : url
+      result = await window.api.speed.upload({ url: upUrl, sizeBytes: 64 * 1024 * 1024 })
+    }
+    // 结果里的采样更完整，用其结果重建曲线与统计
+    speedPoints.length = 0
+    for (const s of result.samples) speedPoints.push({ tSec: s.tSec, bytes: s.bytes })
+    updateSpeedStats(speedPoints)
+    drawSpeedCurve(speedPoints, speedMbps)
+    speedDot.className = 'status-dot reachable'
+    setSpeedMsg(
+      `${kind === 'download' ? '下载' : '上传'}测速完成：平均 ${(result.avgBps / 1e6).toFixed(2)} MB/s，共 ${fmtBytes(result.totalBytes)}。`,
+      'ok'
+    )
+  } catch (err) {
+    speedDot.className = 'status-dot unreachable'
+    setSpeedMsg(`${kind === 'download' ? '下载' : '上传'}测速失败：${errMessage(err)}`, 'err')
+  } finally {
+    off()
+    speedRunning = false
+    speedDownBtn.disabled = false
+    speedUpBtn.disabled = false
+    speedCancelBtn.disabled = true
+  }
+}
+
+speedDownBtn.addEventListener('click', () => void runSpeed('download'))
+speedUpBtn.addEventListener('click', () => void runSpeed('upload'))
+speedCancelBtn.addEventListener('click', () => void window.api?.speed.cancel())
+speedCancelBtn.disabled = true
 
 init()

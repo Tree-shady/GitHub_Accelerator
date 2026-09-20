@@ -19,12 +19,13 @@
           </div>
         </div>
         <div class="header-actions">
+          <button class="btn btn-primary" id="oneClickBtn">⚡ 一键诊断并加速</button>
           <label class="switch">
             <input type="checkbox" id="proxyToggle" />
             <span class="switch-track"></span>
             <span class="switch-label">使用代理探测</span>
           </label>
-          <button class="btn btn-primary" id="runBtn">开始检测</button>
+          <button class="btn btn-ghost" id="runBtn">开始检测</button>
         </div>
       </header>
 
@@ -142,6 +143,91 @@
         <p class="url-tip">
           提示：第三方镜像会经其服务器转发，请只用于公开仓库，<strong>切勿粘贴私有仓库或含凭据/令牌的地址</strong>。
         </p>
+      </section>
+
+      <section class="hosts-card speed-card">
+        <div class="hosts-head">
+          <div class="hosts-title">
+            <span class="status-dot idle" id="speedDot"></span>
+            <div>
+              <h2>加速测速（下载 / 上传）</h2>
+              <p>测量当前网络经加速通道的实时速率与累计流量，用于对比加速效果。</p>
+            </div>
+          </div>
+          <div class="hosts-actions">
+            <button class="btn btn-primary" id="speedDownBtn">测下载</button>
+            <button class="btn btn-ghost" id="speedUpBtn">测上传</button>
+            <button class="btn btn-danger" id="speedCancelBtn">停止</button>
+          </div>
+        </div>
+        <div class="git-fields">
+          <div class="field speed-url-field">
+            <label for="speedUrl">测速端点（默认 Cloudflare；可改为镜像/raw 地址）</label>
+            <input id="speedUrl" type="text" value="https://speed.cloudflare.com/__down?bytes=52428800" />
+          </div>
+        </div>
+        <div class="speed-stats">
+          <div class="stat">
+            <div class="stat-label">当前速率</div>
+            <div class="stat-value" id="speedNow">–</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">平均速率</div>
+            <div class="stat-value" id="speedAvg">–</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">已用流量</div>
+            <div class="stat-value" id="speedTotal">–</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">已用时</div>
+            <div class="stat-value" id="speedTime">–</div>
+          </div>
+        </div>
+        <div class="speed-chart">
+          <canvas id="speedCanvas" width="860" height="180"></canvas>
+        </div>
+        <div class="hosts-msg" id="speedMsg"></div>
+      </section>
+
+      <section class="hosts-card ippool-card">
+        <div class="hosts-head">
+          <div class="hosts-title">
+            <span class="status-dot idle" id="ippoolDot"></span>
+            <div>
+              <h2>GitHub IP 池</h2>
+              <p>检测到 github.com 被污染的解析时会用此兜底池探测。默认 IP 可能随时间失效，可在此添加自定义可用 IP。</p>
+            </div>
+          </div>
+          <div class="hosts-actions">
+            <button class="btn btn-ghost" id="ippoolReadBtn">载入当前</button>
+            <button class="btn btn-primary" id="ippoolSaveBtn">保存</button>
+          </div>
+        </div>
+        <div class="url-box">
+          <label for="ippoolInput">自定义 IP（每行一个，仅对 github.com 生效）</label>
+          <textarea id="ippoolInput" rows="3" spellcheck="false" placeholder="例如：&#10;20.27.177.113&#10;140.82.116.3"></textarea>
+        </div>
+        <div class="hosts-msg" id="ippoolMsg"></div>
+      </section>
+
+      <section class="hosts-card log-card">
+        <div class="hosts-head">
+          <div class="hosts-title">
+            <span class="status-dot idle" id="logDot"></span>
+            <div>
+              <h2>操作日志</h2>
+              <p>记录 hosts / git 等敏感写入操作，便于排查与审计。</p>
+            </div>
+          </div>
+          <div class="hosts-actions">
+            <button class="btn btn-ghost" id="logRefreshBtn">刷新</button>
+            <button class="btn btn-primary" id="logExportBtn">导出</button>
+            <button class="btn btn-danger" id="logClearBtn">清空</button>
+          </div>
+        </div>
+        <pre class="log-view" id="logView"></pre>
+        <div class="hosts-msg" id="logMsg"></div>
       </section>
 
       <section class="summary-card">
