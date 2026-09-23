@@ -268,7 +268,7 @@ async function writeViaElevationViaPowershell(staging: string, hostsPath: string
     "$ErrorActionPreference='Stop'",
     'Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden',
     `-ArgumentList '-NoProfile','-EncodedCommand','${encoded}'`
-  ].join(' ')
+  ].join('; ')
 
   await runPowershell(['-ExecutionPolicy', 'Bypass', '-Command', outer])
 }

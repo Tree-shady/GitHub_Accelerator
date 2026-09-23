@@ -108,57 +108,17 @@
         <div class="hosts-msg" id="gitMsg"></div>
       </section>
 
-      <section class="hosts-card url-card">
-        <div class="hosts-head">
-          <div class="hosts-title">
-            <span class="status-dot idle" id="urlDot"></span>
-            <div>
-              <h2>URL 镜像改写加速</h2>
-              <p>把 GitHub 链接改写到镜像前缀（ghproxy 风格）便于加速拉取。支持 <code>https://</code>、<code>git://</code>、<code>git@github.com:</code> 三种写法，改好后自动复制到剪贴板。</p>
-            </div>
-          </div>
-          <div class="hosts-actions">
-            <button class="btn btn-ghost" id="urlReadBtn">读取剪贴板</button>
-            <button class="btn btn-primary" id="urlRewriteBtn">改写并复制</button>
-          </div>
-        </div>
-        <div class="git-fields">
-          <div class="field url-field">
-            <label for="mirrorInput">镜像地址</label>
-            <input id="mirrorInput" type="text" list="mirrorList" placeholder="https://gh-proxy.com" value="https://gh-proxy.com" />
-            <datalist id="mirrorList">
-              <option value="https://gh-proxy.com"></option>
-              <option value="https://mirror.ghproxy.com"></option>
-              <option value="https://ghproxy.com"></option>
-            </datalist>
-          </div>
-        </div>
-        <div class="url-box">
-          <label for="urlInput">输入 Git 命令或链接（支持多行）</label>
-          <textarea id="urlInput" rows="3" spellcheck="false" placeholder="例如：git clone https://github.com/user/repo.git&#10;或直接点「读取剪贴板」"></textarea>
-        </div>
-        <div>
-          <div class="preview-title">改写结果：</div>
-          <pre class="url-result" id="urlResult"></pre>
-        </div>
-        <div class="hosts-msg" id="urlMsg"></div>
-        <p class="url-tip">
-          提示：第三方镜像会经其服务器转发，请只用于公开仓库，<strong>切勿粘贴私有仓库或含凭据/令牌的地址</strong>。
-        </p>
-      </section>
-
       <section class="hosts-card speed-card">
         <div class="hosts-head">
           <div class="hosts-title">
             <span class="status-dot idle" id="speedDot"></span>
             <div>
               <h2>加速测速（下载 / 上传）</h2>
-              <p>测量当前网络经加速通道的实时速率与累计流量，用于对比加速效果。</p>
+              <p>启动加速后自动测量当前网络的下载与上传速率，两条折线同图对比。</p>
             </div>
           </div>
           <div class="hosts-actions">
-            <button class="btn btn-primary" id="speedDownBtn">测下载</button>
-            <button class="btn btn-ghost" id="speedUpBtn">测上传</button>
+            <button class="btn btn-ghost" id="speedRunBtn">重新测速</button>
             <button class="btn btn-danger" id="speedCancelBtn">停止</button>
           </div>
         </div>
@@ -174,20 +134,32 @@
             <div class="stat-value" id="speedNow">–</div>
           </div>
           <div class="stat">
-            <div class="stat-label">平均速率</div>
-            <div class="stat-value" id="speedAvg">–</div>
+            <div class="stat-label">下载均速</div>
+            <div class="stat-value" id="speedDownAvg">–</div>
           </div>
           <div class="stat">
-            <div class="stat-label">已用流量</div>
-            <div class="stat-value" id="speedTotal">–</div>
+            <div class="stat-label">上传均速</div>
+            <div class="stat-value" id="speedUpAvg">–</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">下载流量</div>
+            <div class="stat-value" id="speedDownTotal">–</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">上传流量</div>
+            <div class="stat-value" id="speedUpTotal">–</div>
           </div>
           <div class="stat">
             <div class="stat-label">已用时</div>
             <div class="stat-value" id="speedTime">–</div>
           </div>
         </div>
+        <div class="speed-legend">
+          <span class="legend-item"><span class="legend-line down"></span>↓ 下载</span>
+          <span class="legend-item"><span class="legend-line up"></span>↑ 上传</span>
+        </div>
         <div class="speed-chart">
-          <canvas id="speedCanvas" width="860" height="180"></canvas>
+          <canvas id="speedCanvas" width="860" height="200"></canvas>
         </div>
         <div class="hosts-msg" id="speedMsg"></div>
       </section>

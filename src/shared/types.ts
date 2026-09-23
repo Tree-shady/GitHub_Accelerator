@@ -81,3 +81,23 @@ export interface SpeedResult {
   error?: string
   cancelled?: boolean
 }
+
+export type SpeedDirection = 'download' | 'upload'
+
+// 推送给渲染端的实时采样，带方向标记（下载/上传）
+export interface SpeedSampleEvent extends SpeedSample {
+  dir: SpeedDirection
+}
+
+// 一次「下载 + 上传」综合测速的完整结果
+export interface SpeedFullResult {
+  download: SpeedResult
+  upload: SpeedResult
+  cancelled?: boolean
+}
+
+export interface SpeedFullOptions {
+  downloadUrl?: string
+  uploadUrl?: string
+  uploadSizeBytes?: number
+}

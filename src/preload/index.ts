@@ -7,8 +7,9 @@ import type {
   HostEntry,
   HostsStatus,
   ProxyConfig,
-  SpeedResult,
-  SpeedSample,
+  SpeedFullOptions,
+  SpeedFullResult,
+  SpeedSampleEvent,
   Target,
   TargetReport
 } from '../shared/types'
@@ -55,14 +56,13 @@ const api = {
     export: (name?: string): Promise<{ canceled: boolean; filePath?: string }> =>
       ipcRenderer.invoke('log:export', name)
   },
-  // 测速（下载/上传 + 实时采样）
+  // 测速（先下载后上传综合测速 + 实时采样）
   speed: {
-    download: (url?: string): Promise<SpeedResult> => ipcRenderer.invoke('speed:download', url),
-    upload: (opts?: { url?: string; sizeBytes?: number }): Promise<SpeedResult> =>
-      ipcRenderer.invoke('speed:upload', opts),
+    full: (opts?: SpeedFullOptions): Promise<SpeedFullResult> =>
+      ipcRenderer.invoke('speed:full', opts),
     cancel: (): Promise<boolean> => ipcRenderer.invoke('speed:cancel'),
-    onSample: (cb: (s: SpeedSample) => void): (() => void) => {
-      const listener = (_e: unknown, s: SpeedSample): void => cb(s)
+    onSample: (cb: (s: SpeedSampleEvent) => void): (() => void) => {
+      const listener = (_e: unknown, s: SpeedSampleEvent): void => cb(s)
       ipcRenderer.on('speed:sample', listener)
       return () => {
         ipcRenderer.removeListener('speed:sample', listener)

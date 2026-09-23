@@ -18,6 +18,44 @@ export const DEFAULT_DOWNLOAD_URL =
   'https://speed.cloudflare.com/__down?bytes=52428800' // 50MB
 export const DEFAULT_UPLOAD_URL = 'https://speed.cloudflare.com/__up'
 
+export interface FullSpeedOptions {
+  downloadUrl?: string
+  uploadUrl?: string
+  uploadSizeBytes?: number
+}
+
+function emptyResult(): SpeedResult {
+  return { totalBytes: 0, seconds: 0, avgBps: 0, samples: [] }
+}
+
+// 综合测速：先下载后上传（避免互相抢带宽），采样通过 onSample 实时推送，方向由 dir 标记。
+// 用户点「停止」会中断当前阶段并以 cancelled 结果返回，不再继续下一阶段。
+export async function runFullSpeedTest(
+  opts: FullSpeedOptions,
+  onSample: (e: { dir: 'download' | 'upload'; tSec: number; bytes: number }) => void
+): Promise<{ download: SpeedResult; upload: SpeedResult; cancelled?: boolean }> {
+  const downloadUrl = (opts.downloadUrl && opts.downloadUrl.trim()) || DEFAULT_DOWNLOAD_URL
+  const uploadUrl =
+    (opts.uploadUrl && opts.uploadUrl.trim()) ||
+    (/speed\.cloudflare\.com/.test(downloadUrl) ? DEFAULT_UPLOAD_URL : downloadUrl)
+  const uploadSize = Math.max(
+    1,
+    Math.min(opts.uploadSizeBytes || 32 * 1024 * 1024, 256 * 1024 * 1024)
+  )
+
+  const download = await runDownloadTest(downloadUrl, (s) =>
+    onSample({ dir: 'download', ...s })
+  )
+  if (download.cancelled) {
+    return { download, upload: emptyResult(), cancelled: true }
+  }
+
+  const upload = await runUploadTest(uploadUrl, uploadSize, (s) =>
+    onSample({ dir: 'upload', ...s })
+  )
+  return { download, upload, cancelled: upload.cancelled }
+}
+
 let activeAbort: (() => void) | null = null
 
 export function cancelSpeedTest(): void {

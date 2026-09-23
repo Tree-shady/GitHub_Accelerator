@@ -1,5 +1,4 @@
 import './style.css'
-import { containsGitHubUrl, rewriteGitHubUrls } from './rewrite'
 import type {
   GitConfigEntry,
   GitProxyScope,
@@ -7,6 +6,7 @@ import type {
   HostEntry,
   HostsStatus,
   ProxyConfig,
+  SpeedDirection,
   Target,
   TargetReport
 } from '../../shared/types'
@@ -47,14 +47,6 @@ const gitRewrite = document.getElementById('gitRewrite') as HTMLInputElement
 const gitMeta = document.getElementById('gitMeta') as HTMLElement
 const gitPreview = document.getElementById('gitPreview') as HTMLElement
 const gitMsg = document.getElementById('gitMsg') as HTMLElement
-
-const urlDot = document.getElementById('urlDot') as HTMLElement
-const urlReadBtn = document.getElementById('urlReadBtn') as HTMLButtonElement
-const urlRewriteBtn = document.getElementById('urlRewriteBtn') as HTMLButtonElement
-const urlInput = document.getElementById('urlInput') as HTMLTextAreaElement
-const mirrorInput = document.getElementById('mirrorInput') as HTMLInputElement
-const urlResult = document.getElementById('urlResult') as HTMLElement
-const urlMsg = document.getElementById('urlMsg') as HTMLElement
 
 let states: TargetState[] = []
 let lastReports: TargetReport[] | null = null
@@ -328,6 +320,8 @@ hostsApplyBtn.addEventListener('click', async () => {
       'ok'
     )
     await refreshHostsStatus()
+    // 启动加速后自动测速（下载 + 上传双折线）
+    void runFullSpeed()
   } catch (err) {
     setHostsMsg(`应用失败：${errMessage(err)}`, 'err')
   } finally {
@@ -448,59 +442,6 @@ gitClearBtn.addEventListener('click', async () => {
 
 gitRefreshBtn.addEventListener('click', () => void refreshGitStatus())
 
-function setUrlMsg(text: string, kind: '' | 'ok' | 'err' | 'warn'): void {
-  urlMsg.textContent = text
-  urlMsg.className = 'hosts-msg' + (kind ? ` ${kind}` : '')
-}
-
-urlReadBtn.addEventListener('click', async () => {
-  if (!window.api) return
-  try {
-    const text = await window.api.clipboard.read()
-    if (!text.trim()) {
-      setUrlMsg('剪贴板为空。', 'warn')
-      return
-    }
-    urlInput.value = text
-    urlDot.className = 'status-dot reachable'
-    if (containsGitHubUrl(text)) {
-      setUrlMsg('已读取剪贴板，检测到 GitHub 链接，可直接改写。', 'ok')
-    } else {
-      setUrlMsg('已读取剪贴板（未识别到 GitHub 链接，仍可据此手动编辑）。', 'warn')
-    }
-  } catch (err) {
-    setUrlMsg(`读取剪贴板失败：${errMessage(err)}`, 'err')
-  }
-})
-
-urlRewriteBtn.addEventListener('click', async () => {
-  const input = urlInput.value
-  if (!input.trim()) {
-    setUrlMsg('请在输入框粘贴内容，或点「读取剪贴板」。', 'warn')
-    return
-  }
-  if (!window.api) return
-  const mirror = mirrorInput.value.trim()
-  if (!mirror) {
-    setUrlMsg('请填写镜像地址。', 'warn')
-    return
-  }
-  const rewritten = rewriteGitHubUrls(input, mirror)
-  urlResult.textContent = rewritten
-  if (rewritten === input) {
-    setUrlMsg('未在其中识别到可改写的 GitHub 链接。', 'warn')
-    urlDot.className = 'status-dot idle'
-    return
-  }
-  try {
-    await window.api.clipboard.write(rewritten)
-    urlDot.className = 'status-dot reachable'
-    setUrlMsg('改写完成，已复制到剪贴板。', 'ok')
-  } catch (err) {
-    setUrlMsg(`改写完成，但复制剪贴板失败：${errMessage(err)}`, 'warn')
-  }
-})
-
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
@@ -535,6 +476,8 @@ oneClickBtn.addEventListener('click', async () => {
       'ok'
     )
     await refreshHostsStatus()
+    // 一键加速成功后自动测速（下载 + 上传双折线）
+    void runFullSpeed()
   } catch (err) {
     setHostsMsg(`一键加速失败：${errMessage(err)}`, 'err')
   } finally {
@@ -631,15 +574,16 @@ logClearBtn.addEventListener('click', async () => {
   }
 })
 
-/* ===================== 加速测速（下载 / 上传 + 流量） ===================== */
+/* ===================== 加速测速（下载 / 上传 双折线） ===================== */
 const speedDot = document.getElementById('speedDot') as HTMLElement
-const speedDownBtn = document.getElementById('speedDownBtn') as HTMLButtonElement
-const speedUpBtn = document.getElementById('speedUpBtn') as HTMLButtonElement
+const speedRunBtn = document.getElementById('speedRunBtn') as HTMLButtonElement
 const speedCancelBtn = document.getElementById('speedCancelBtn') as HTMLButtonElement
 const speedUrl = document.getElementById('speedUrl') as HTMLInputElement
 const speedNow = document.getElementById('speedNow') as HTMLElement
-const speedAvg = document.getElementById('speedAvg') as HTMLElement
-const speedTotal = document.getElementById('speedTotal') as HTMLElement
+const speedDownAvg = document.getElementById('speedDownAvg') as HTMLElement
+const speedUpAvg = document.getElementById('speedUpAvg') as HTMLElement
+const speedDownTotal = document.getElementById('speedDownTotal') as HTMLElement
+const speedUpTotal = document.getElementById('speedUpTotal') as HTMLElement
 const speedTime = document.getElementById('speedTime') as HTMLElement
 const speedCanvas = document.getElementById('speedCanvas') as HTMLCanvasElement
 const speedMsg = document.getElementById('speedMsg') as HTMLElement
@@ -649,9 +593,13 @@ interface SpeedPoint {
   bytes: number
 }
 
+const DOWN_COLOR = '#3b82f6'
+const UP_COLOR = '#f59e0b'
+
 let speedRunning = false
-let speedMbps = false
-const speedPoints: SpeedPoint[] = []
+let speedPhase: SpeedDirection | null = null
+const downPoints: SpeedPoint[] = []
+const upPoints: SpeedPoint[] = []
 
 function setSpeedMsg(text: string, kind: '' | 'ok' | 'err' | 'warn'): void {
   speedMsg.textContent = text
@@ -669,116 +617,205 @@ function fmtBytes(n: number): string {
   return `${n} B`
 }
 
-function drawSpeedCurve(points: SpeedPoint[], mbps: boolean): void {
-  const ctx = speedCanvas.getContext('2d')
-  if (!ctx) return
+// 某条采样对应的瞬时速率：按与上一条采样的真实时间差折算（采样间隔约 1s）
+function pointRate(series: SpeedPoint[], i: number): number {
+  const dt = i > 0 ? series[i].tSec - series[i - 1].tSec : 1
+  return series[i].bytes / Math.max(0.001, dt)
+}
+
+function niceCeil(v: number): number {
+  if (v <= 1) return 1
+  const mag = Math.pow(10, Math.floor(Math.log10(v)))
+  const n = v / mag
+  const nice = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10
+  return nice * mag
+}
+
+function drawSpeedChart(): void {
+  const ctx = speedCanvas.getContext('2d')!
   const w = speedCanvas.width
   const h = speedCanvas.height
   ctx.clearRect(0, 0, w, h)
 
-  const unit = mbps ? 1e6 : 1e3
-  const peak = Math.max(1, ...points.map((p) => (p.bytes * 1000) / unit))
+  const padL = 44
+  const padR = 14
+  const padT = 12
+  const padB = 22
+  const plotW = w - padL - padR
+  const plotH = h - padT - padB
 
-  // 网格
+  const downRates = downPoints.map((_, i) => pointRate(downPoints, i))
+  const upRates = upPoints.map((_, i) => pointRate(upPoints, i))
+  const yMax = niceCeil(Math.max(1, ...downRates, ...upRates))
+  const n = Math.max(downPoints.length, upPoints.length)
+
+  // 横向网格 + Y 轴刻度（MB/s）
   ctx.strokeStyle = '#1e293b'
   ctx.fillStyle = '#8b97ad'
   ctx.font = '10px sans-serif'
   ctx.lineWidth = 1
   for (let i = 0; i <= 4; i++) {
-    const y = h - (h * i) / 4
+    const y = padT + plotH - (plotH * i) / 4
     ctx.beginPath()
-    ctx.moveTo(34, y)
-    ctx.lineTo(w, y)
+    ctx.moveTo(padL, y)
+    ctx.lineTo(w - padR, y)
     ctx.stroke()
-    ctx.fillText(`${((peak * i) / 4).toFixed(1)}`, 4, y - 3)
+    ctx.fillText(`${((yMax * i) / 4 / 1e6).toFixed(1)}`, 4, y - 3)
   }
 
-  // 柱状图（每秒一个柱）
-  const bw = (w - 34) / Math.max(1, points.length)
-  const grad = ctx.createLinearGradient(0, 0, 0, h)
-  grad.addColorStop(0, '#3b82f6')
-  grad.addColorStop(1, 'rgba(59,130,246,0.15)')
-  ctx.fillStyle = grad
-  for (let i = 0; i < points.length; i++) {
-    const val = (points[i].bytes * 1000) / unit // 当前秒速率
-    const bh = (h * val) / peak
-    ctx.fillRect(34 + i * bw, h - bh, Math.max(1, bw - 1), bh)
+  // 纵向网格 + X 轴秒标（点太多时间隔标注，避免文字重叠）
+  if (n > 0) {
+    const xAt = (i: number): number =>
+      padL + (n === 1 ? plotW / 2 : (plotW * i) / (n - 1))
+    const step = n <= 12 ? 1 : Math.ceil(n / 8)
+    ctx.textAlign = 'center'
+    for (let i = 0; i < n; i += step) {
+      const x = xAt(i)
+      ctx.beginPath()
+      ctx.moveTo(x, padT)
+      ctx.lineTo(x, padT + plotH)
+      ctx.stroke()
+      ctx.fillText(`${i + 1}s`, x, h - 6)
+    }
+    ctx.textAlign = 'start'
   }
+
+  // 折线（速率曲线），带圆点；下载线下方加淡色面积
+  function drawLine(rates: number[], color: string, fill: boolean): void {
+    if (!rates.length) return
+    const xAt = (i: number): number =>
+      padL + (n === 1 ? plotW / 2 : (plotW * i) / (n - 1))
+    const yAt = (rate: number): number => padT + plotH - (plotH * rate) / yMax
+
+    if (fill) {
+      const grad = ctx.createLinearGradient(0, padT, 0, padT + plotH)
+      grad.addColorStop(0, 'rgba(59,130,246,0.22)')
+      grad.addColorStop(1, 'rgba(59,130,246,0.01)')
+      ctx.fillStyle = grad
+      ctx.beginPath()
+      ctx.moveTo(xAt(0), padT + plotH)
+      rates.forEach((r, i) => ctx.lineTo(xAt(i), yAt(r)))
+      ctx.lineTo(xAt(rates.length - 1), padT + plotH)
+      ctx.closePath()
+      ctx.fill()
+    }
+
+    ctx.strokeStyle = color
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    rates.forEach((r, i) => {
+      const x = xAt(i)
+      const y = yAt(r)
+      if (i === 0) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
+    })
+    ctx.stroke()
+
+    ctx.fillStyle = color
+    for (let i = 0; i < rates.length; i++) {
+      ctx.beginPath()
+      ctx.arc(xAt(i), yAt(rates[i]), 2.5, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+
+  drawLine(downRates, DOWN_COLOR, true)
+  drawLine(upRates, UP_COLOR, false)
 }
 
-function updateSpeedStats(points: SpeedPoint[]): void {
-  const last = points.length ? points[points.length - 1] : null
-  const nowBps = last ? last.bytes * 1000 : 0
-  speedNow.textContent = nowBps > 0 ? fmtRate(nowBps) : '–'
-  const totalBytes = points.reduce((a, p) => a + p.bytes, 0)
-  const avgBps = points.length ? totalBytes / Math.max(0.5, points.length) : 0
-  speedAvg.textContent = avgBps > 0 ? `${(avgBps / 1e6).toFixed(2)} MB/s` : '–'
-  speedTotal.textContent = fmtBytes(totalBytes * 1000)
-  const t = points.length ? points[points.length - 1].tSec : 0
-  speedTime.textContent = `${t.toFixed(1)} s`
+function seriesStats(series: SpeedPoint[]): { total: number; avg: number } {
+  const total = series.reduce((a, p) => a + p.bytes, 0)
+  const lastT = series.length ? series[series.length - 1].tSec : 0
+  return { total, avg: lastT > 0 ? total / lastT : 0 }
 }
 
-async function runSpeed(kind: 'download' | 'upload'): Promise<void> {
+function updateSpeedStats(): void {
+  const active = speedPhase === 'upload' ? upPoints : downPoints
+  const last = active.length ? active[active.length - 1] : null
+  speedNow.textContent = last ? `${speedPhase === 'upload' ? '↑' : '↓'} ${fmtRate(pointRate(active, active.length - 1))}` : '–'
+
+  const down = seriesStats(downPoints)
+  const up = seriesStats(upPoints)
+  speedDownAvg.textContent = down.avg > 0 ? fmtRate(down.avg) : '–'
+  speedUpAvg.textContent = up.avg > 0 ? fmtRate(up.avg) : '–'
+  speedDownTotal.textContent = down.total > 0 ? fmtBytes(down.total) : '–'
+  speedUpTotal.textContent = up.total > 0 ? fmtBytes(up.total) : '–'
+
+  const t = last ? last.tSec : 0
+  speedTime.textContent = t > 0 ? `${t.toFixed(1)} s` : '–'
+}
+
+function resetSpeedView(): void {
+  for (const el of [
+    speedNow,
+    speedDownAvg,
+    speedUpAvg,
+    speedDownTotal,
+    speedUpTotal,
+    speedTime
+  ])
+    el.textContent = '–'
+  drawSpeedChart()
+}
+
+// 综合测速：先下载、后上传，采样实时推送并绘制双折线
+async function runFullSpeed(): Promise<void> {
   if (!window.api || speedRunning) return
   speedRunning = true
-  speedMbps = true
-  speedPoints.length = 0
-  for (const b of [speedDownBtn, speedUpBtn, speedCancelBtn]) b.disabled = false
-  speedDownBtn.disabled = true
-  speedUpBtn.disabled = true
+  speedPhase = 'download'
+  downPoints.length = 0
+  upPoints.length = 0
+  speedRunBtn.disabled = true
+  speedCancelBtn.disabled = false
   speedDot.className = 'status-dot pending'
-  setSpeedMsg(kind === 'download' ? '正在测下载…' : '正在测上传…', '')
+  setSpeedMsg('加速已启动，正在测速：下载阶段…', '')
+  resetSpeedView()
 
   const off = window.api.speed.onSample((s) => {
-    speedPoints.push({ tSec: s.tSec, bytes: s.bytes })
-    updateSpeedStats(speedPoints)
-    drawSpeedCurve(speedPoints, speedMbps)
+    const series = s.dir === 'upload' ? upPoints : downPoints
+    series.push({ tSec: s.tSec, bytes: s.bytes })
+    speedPhase = s.dir
+    updateSpeedStats()
+    drawSpeedChart()
+    if (s.dir === 'upload') setSpeedMsg('下载完成，正在测速：上传阶段…', '')
   })
 
   try {
-    let result
-    if (kind === 'download') {
-      result = await window.api.speed.download(speedUrl.value.trim())
-    } else {
-      const url = speedUrl.value.trim()
-      const upUrl = /speed\.cloudflare\.com/.test(url)
-        ? 'https://speed.cloudflare.com/__up'
-        : url
-      result = await window.api.speed.upload({ url: upUrl, sizeBytes: 64 * 1024 * 1024 })
-    }
-    if (result.cancelled) {
+    const res = await window.api.speed.full({ downloadUrl: speedUrl.value.trim() })
+    if (res.cancelled) {
       speedDot.className = 'status-dot idle'
       setSpeedMsg('测速已停止。', '')
       return
     }
-    // 结果里的采样更完整，用其结果重建曲线与统计（去掉结尾的空采样，避免多一个 0 柱）
-    speedPoints.length = 0
-    const clean = result.samples.slice()
-    while (clean.length && clean[clean.length - 1].bytes === 0) clean.pop()
-    for (const s of clean) speedPoints.push({ tSec: s.tSec, bytes: s.bytes })
-    if (speedPoints.length) {
-      updateSpeedStats(speedPoints)
-      drawSpeedCurve(speedPoints, speedMbps)
+    // 用完整结果重建两条曲线（去掉结尾空采样，避免末尾掉到 0）
+    const fillSeries = (target: SpeedPoint[], raw: { tSec: number; bytes: number }[]): void => {
+      const clean = raw.slice()
+      while (clean.length && clean[clean.length - 1].bytes === 0) clean.pop()
+      target.length = 0
+      target.push(...clean)
     }
+    fillSeries(downPoints, res.download.samples)
+    fillSeries(upPoints, res.upload.samples)
+    updateSpeedStats()
+    drawSpeedChart()
     speedDot.className = 'status-dot reachable'
     setSpeedMsg(
-      `${kind === 'download' ? '下载' : '上传'}测速完成：平均 ${(result.avgBps / 1e6).toFixed(2)} MB/s，共 ${fmtBytes(result.totalBytes)}。`,
+      `测速完成：下载平均 ${fmtRate(res.download.avgBps)}，上传平均 ${fmtRate(res.upload.avgBps)}。`,
       'ok'
     )
   } catch (err) {
     speedDot.className = 'status-dot unreachable'
-    setSpeedMsg(`${kind === 'download' ? '下载' : '上传'}测速失败：${errMessage(err)}`, 'err')
+    setSpeedMsg(`测速失败：${errMessage(err)}`, 'err')
   } finally {
     off()
     speedRunning = false
-    speedDownBtn.disabled = false
-    speedUpBtn.disabled = false
+    speedPhase = null
+    speedRunBtn.disabled = false
     speedCancelBtn.disabled = true
   }
 }
 
-speedDownBtn.addEventListener('click', () => void runSpeed('download'))
-speedUpBtn.addEventListener('click', () => void runSpeed('upload'))
+speedRunBtn.addEventListener('click', () => void runFullSpeed())
 speedCancelBtn.addEventListener('click', () => void window.api?.speed.cancel())
 speedCancelBtn.disabled = true
 

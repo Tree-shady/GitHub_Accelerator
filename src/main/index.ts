@@ -8,11 +8,7 @@ import { getCustomIps, setCustomIps } from './ippool'
 import { clearLog, getLog, logEvent } from './logger'
 import {
   cancelSpeedTest,
-  DEFAULT_DOWNLOAD_URL,
-  DEFAULT_UPLOAD_URL,
-  runDownloadTest,
-  runUploadTest,
-  type SpeedSample
+  runFullSpeedTest
 } from './speed'
 
 const isDev = !!process.env['ELECTRON_RENDERER_URL']
@@ -105,10 +101,6 @@ async function createWindow(): Promise<void> {
   }
 }
 
-function sendSpeedSample(win: BrowserWindow, s: SpeedSample): void {
-  if (!win.isDestroyed()) win.webContents.send('speed:sample', s)
-}
-
 function registerIpc(): void {
   ipcMain.handle('connectivity:test', async (_event, payload) => {
     const { proxy, targets, timeoutMs = 3000 } = payload ?? {}
@@ -183,22 +175,12 @@ function registerIpc(): void {
     return { canceled: false, filePath }
   })
 
-  // ---- 测速 ----
-  ipcMain.handle('speed:download', async (event, url?: string) => {
+  // ---- 测速（下载 + 上传连续综合测速，采样实时推送）----
+  ipcMain.handle('speed:full', async (event, opts) => {
     cancelSpeedTest()
     const target = BrowserWindow.fromWebContents(event.sender)
-    const u = (url && url.trim()) || DEFAULT_DOWNLOAD_URL
-    return await runDownloadTest(u, (s) => {
-      if (target) sendSpeedSample(target, s)
-    })
-  })
-  ipcMain.handle('speed:upload', async (event, opts: { url?: string; sizeBytes?: number }) => {
-    cancelSpeedTest()
-    const target = BrowserWindow.fromWebContents(event.sender)
-    const u = (opts?.url && opts.url.trim()) || DEFAULT_UPLOAD_URL
-    const sizeBytes = Math.max(1, Math.min(opts?.sizeBytes || 32 * 1024 * 1024, 256 * 1024 * 1024))
-    return await runUploadTest(u, sizeBytes, (s) => {
-      if (target) sendSpeedSample(target, s)
+    return await runFullSpeedTest(opts ?? {}, (s) => {
+      if (target && !target.isDestroyed()) target.webContents.send('speed:sample', s)
     })
   })
   ipcMain.handle('speed:cancel', () => {
