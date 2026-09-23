@@ -79,4 +79,5 @@ export interface SpeedResult {
   avgBps: number
   samples: SpeedSample[]
   error?: string
+  cancelled?: boolean
 }

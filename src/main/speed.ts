@@ -11,6 +11,7 @@ export interface SpeedResult {
   avgBps: number // 平均速率 字节/秒
   samples: SpeedSample[]
   error?: string
+  cancelled?: boolean // 用户点“停止”时被中断
 }
 
 export const DEFAULT_DOWNLOAD_URL =
@@ -33,6 +34,8 @@ function launcher(url: string): (typeof https.request) | (typeof http.request) {
 }
 
 const SAMPLE_MS = 1000
+// 无数据流入出超过该时长即视为卡死，主动报错以免界面一直挂着
+const INACTIVITY_TIMEOUT_MS = 60_000
 
 function makeSampler(
   startedAt: number,
@@ -71,10 +74,17 @@ function makeSampler(
 function finalize(
   startSec: number,
   totalBytes: number,
-  samples: SpeedSample[]
+  samples: SpeedSample[],
+  cancelled = false
 ): SpeedResult {
   const seconds = Date.now() / 1000 - startSec
-  return { totalBytes, seconds, avgBps: seconds > 0 ? totalBytes / seconds : 0, samples }
+  return {
+    totalBytes,
+    seconds,
+    avgBps: seconds > 0 ? totalBytes / seconds : 0,
+    samples,
+    cancelled
+  }
 }
 
 export function runDownloadTest(
@@ -88,14 +98,24 @@ export function runDownloadTest(
     let total = 0
     let settled = false
 
-    const req = launcher(url)(url, { method: 'GET' })
-    activeAbort = () => {
-      if (!settled) {
-        settled = true
-        req.destroy()
-        resolve(finalize(startSec, total, sampler.samples))
-      }
+    function abort(): void {
+      if (settled) return
+      settled = true
+      sampler.stop()
+      req.destroy()
+      resolve(finalize(startSec, total, sampler.samples, true))
     }
+
+    const req = launcher(url)(url, { method: 'GET' })
+    activeAbort = abort
+    req.setTimeout(INACTIVITY_TIMEOUT_MS, () => {
+      if (settled) return
+      settled = true
+      sampler.stop()
+      activeAbort = null
+      req.destroy()
+      reject(new Error('下载测速超时（60 秒无数据），请检查网络或更换测速端点'))
+    })
     req.on('error', (err) => {
       if (settled) return
       settled = true
@@ -113,6 +133,14 @@ export function runDownloadTest(
         res.resume()
         return
       }
+      res.setTimeout(INACTIVITY_TIMEOUT_MS, () => {
+        if (settled) return
+        settled = true
+        sampler.stop()
+        activeAbort = null
+        req.destroy()
+        reject(new Error('下载测速超时（60 秒无数据）'))
+      })
       res.on('data', (chunk) => {
         total += chunk.length
         sampler.pushBytes(chunk.length)
@@ -142,6 +170,14 @@ export function runUploadTest(
     let sent = 0
     let settled = false
 
+    function abort(): void {
+      if (settled) return
+      settled = true
+      sampler.stop()
+      req.destroy()
+      resolve(finalize(startSec, sent, sampler.samples, true))
+    }
+
     const req = launcher(url)(url, {
       method: 'POST',
       headers: {
@@ -149,13 +185,15 @@ export function runUploadTest(
         'Content-Type': 'application/octet-stream'
       }
     })
-    activeAbort = () => {
-      if (!settled) {
-        settled = true
-        req.destroy()
-        resolve(finalize(startSec, sent, sampler.samples))
-      }
-    }
+    activeAbort = abort
+    req.setTimeout(INACTIVITY_TIMEOUT_MS, () => {
+      if (settled) return
+      settled = true
+      sampler.stop()
+      activeAbort = null
+      req.destroy()
+      reject(new Error('上传测速超时（60 秒无数据）'))
+    })
     req.on('error', (err) => {
       if (settled) return
       settled = true

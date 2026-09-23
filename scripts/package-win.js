@@ -170,37 +170,47 @@ function verifyAll(signtool) {
 async function main() {
   const cert = resolveCert()
   const signtool = findSigntool()
-
-  if (cert) {
-    if (!signtool) {
-      console.error('[签名] 检测到 CSC_LINK，但未找到 signtool.exe。')
-      console.error('[签名] 请用环境变量 SIGTOOL 指定 signtool 路径，或先跑一次打包下载 winCodeSign，或用文件资源管理器装 Windows SDK。')
-    } else {
-      // 打包前先签源件
-      if (fs.existsSync(HELPER)) {
-        console.log('[签名] 打包前签名 elevate-copy.exe …')
-        signFile(signtool, cert, HELPER)
+  try {
+    if (cert) {
+      if (!signtool) {
+        console.error('[签名] 检测到 CSC_LINK，但未找到 signtool.exe。')
+        console.error('[签名] 请用环境变量 SIGTOOL 指定 signtool 路径，或先跑一次打包下载 winCodeSign，或用文件资源管理器装 Windows SDK。')
+      } else {
+        // 打包前先签源件
+        if (fs.existsSync(HELPER)) {
+          console.log('[签名] 打包前签名 elevate-copy.exe …')
+          signFile(signtool, cert, HELPER)
+        }
+        // 交给 electron-builder：它用这两个环境变量自动签主程序/卸载器/安装包
+        process.env.CSC_LINK = cert.pfx
+        process.env.CSC_KEY_PASSWORD = cert.password
       }
-      // 交给 electron-builder：它用这两个环境变量自动签主程序/卸载器/安装包
-      process.env.CSC_LINK = cert.pfx
-      process.env.CSC_KEY_PASSWORD = cert.password
+    } else {
+      console.log('[签名] 未配置 CSC_LINK，以「未签名」模式打包（杀软可能仍会误报）。')
     }
-  } else {
-    console.log('[签名] 未配置 CSC_LINK，以「未签名」模式打包（杀软可能仍会误报）。')
+
+    const portable = process.argv.includes('--portable')
+    const options = portable
+      ? { config: { win: { target: [{ target: 'portable', arch: ['x64'] }] } } }
+      : {}
+
+    await build(options)
+
+    if (cert && signtool) {
+      signAll(signtool, cert)
+      verifyAll(signtool)
+    }
+    console.log('打包完成。')
+  } finally {
+    // 清理解码证书时写入临时目录的 pfx，避免私钥文件残留在磁盘
+    if (cert && cert.temp) {
+      try {
+        fs.rmSync(cert.pfx, { force: true })
+      } catch {
+        /* 清理失败可忽略 */
+      }
+    }
   }
-
-  const portable = process.argv.includes('--portable')
-  const options = portable
-    ? { config: { win: { target: [{ target: 'portable', arch: ['x64'] }] } } }
-    : {}
-
-  await build(options)
-
-  if (cert && signtool) {
-    signAll(signtool, cert)
-    verifyAll(signtool)
-  }
-  console.log('打包完成。')
 }
 
 main()

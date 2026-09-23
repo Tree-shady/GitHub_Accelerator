@@ -152,8 +152,16 @@ async function writeViaElevation(content: string): Promise<void> {
 
   const helper = elevateCopyPath()
   if (helper) {
-    await elevateViaStartProcess(helper, staging, hostsPath)
-    return
+    try {
+      await elevateViaStartProcess(helper, staging, hostsPath)
+      return
+    } catch (err) {
+      // 辅助程序失败：可能是旧/损坏的 helper（不写结果、无法提权），也可能是系统拦截。
+      // 若并非用户取消 UAC，则用 PowerShell -Verb RunAs 兜底再执行一次真正的提权复制。
+      if (errText(err).includes('提权被取消')) throw err
+      await writeViaElevationViaPowershell(staging, hostsPath)
+      return
+    }
   }
 
   await writeViaElevationViaPowershell(staging, hostsPath)

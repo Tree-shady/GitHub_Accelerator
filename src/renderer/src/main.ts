@@ -59,6 +59,14 @@ const urlMsg = document.getElementById('urlMsg') as HTMLElement
 let states: TargetState[] = []
 let lastReports: TargetReport[] | null = null
 
+const bannerMsg = document.getElementById('bannerMsg') as HTMLElement
+
+// 顶部的全局提示条，用于展示检测级错误等与具体卡片无关的信息
+function setBanner(text: string, kind: '' | 'ok' | 'err' | 'warn'): void {
+  bannerMsg.textContent = text
+  bannerMsg.className = 'banner' + (kind ? ` ${kind}` : '') + (text ? '' : ' hidden')
+}
+
 function init(): void {
   if (window.api) {
     window.api.getTargets().then((list) => {
@@ -97,6 +105,7 @@ async function run(): Promise<void> {
     : undefined
 
   setAll('pending')
+  setBanner('', '')
   try {
     const reports = await window.api.testConnectivity({
       targets: states.map((s) => s.raw),
@@ -105,6 +114,7 @@ async function run(): Promise<void> {
     applyReports(reports)
   } catch (err) {
     setAll('unreachable')
+    setBanner(`检测失败：${errMessage(err)}`, 'err')
     console.error(err)
   } finally {
     runBtn.disabled = false
@@ -588,7 +598,6 @@ function setLogMsg(text: string, kind: '' | 'ok' | 'err' | 'warn'): void {
 async function refreshLog(): Promise<void> {
   if (!window.api) return
   const content = await window.api.log.get()
-  logView.textContent = content.trim() || ''
   logView.innerHTML = ''
   if (content.trim()) {
     for (const line of content.trim().split('\n')) {
@@ -737,11 +746,20 @@ async function runSpeed(kind: 'download' | 'upload'): Promise<void> {
         : url
       result = await window.api.speed.upload({ url: upUrl, sizeBytes: 64 * 1024 * 1024 })
     }
-    // 结果里的采样更完整，用其结果重建曲线与统计
+    if (result.cancelled) {
+      speedDot.className = 'status-dot idle'
+      setSpeedMsg('测速已停止。', '')
+      return
+    }
+    // 结果里的采样更完整，用其结果重建曲线与统计（去掉结尾的空采样，避免多一个 0 柱）
     speedPoints.length = 0
-    for (const s of result.samples) speedPoints.push({ tSec: s.tSec, bytes: s.bytes })
-    updateSpeedStats(speedPoints)
-    drawSpeedCurve(speedPoints, speedMbps)
+    const clean = result.samples.slice()
+    while (clean.length && clean[clean.length - 1].bytes === 0) clean.pop()
+    for (const s of clean) speedPoints.push({ tSec: s.tSec, bytes: s.bytes })
+    if (speedPoints.length) {
+      updateSpeedStats(speedPoints)
+      drawSpeedCurve(speedPoints, speedMbps)
+    }
     speedDot.className = 'status-dot reachable'
     setSpeedMsg(
       `${kind === 'download' ? '下载' : '上传'}测速完成：平均 ${(result.avgBps / 1e6).toFixed(2)} MB/s，共 ${fmtBytes(result.totalBytes)}。`,

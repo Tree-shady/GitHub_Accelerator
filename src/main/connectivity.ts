@@ -98,14 +98,17 @@ function tcpProbe(
     })
     socket.on('data', (chunk) => {
       const text = chunk.toString()
-      if (/^HTTP\/1\.[01] 2\d\d/.test(text)) {
+      const m = /^HTTP\/1\.[01] (\d{3})/.exec(text)
+      if (m && m[1].startsWith('2')) {
         settle({ connected: true, latencyMs: Date.now() - start })
       } else {
-        settle({
-          connected: false,
-          latencyMs: Date.now() - start,
-          error: `代理拒绝：${text.split('\r\n')[0]}`
-        })
+        const code = m ? m[1] : ''
+        const reason = code
+          ? code === '407'
+            ? '代理需要认证（407），请填写代理用户名/密码'
+            : `代理返回 ${code}：${text.split('\r\n')[0]}`
+          : `代理拒绝：${text.split('\r\n')[0]}`
+        settle({ connected: false, latencyMs: Date.now() - start, error: reason })
       }
     })
     socket.connect(proxy.port, proxy.host)
